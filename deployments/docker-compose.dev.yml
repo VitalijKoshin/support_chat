@@ -1,0 +1,104 @@
+version: '3.9'
+name: supportchat
+
+services:
+  supportchat:
+    container_name: supportchat
+    env_file: ./../configs/.env
+    tty: true
+    build:
+      context: ./../
+      dockerfile: ./build/packpage/Dockerfile
+    ports:
+      - ${PORT_APP_LOCAL}:${PORT_APP}
+    # restart: on-failure
+    volumes:
+      - ./../:/supportchat
+    depends_on:
+      - supportchat_mysql
+      - supportchat_redis
+      - supportchat_migrate
+    networks:
+      - supportchat
+  supportchat_mysql:
+    container_name: supportchat_mysql
+    image: mariadb:10.5
+    # logging sql queries
+    environment:
+      MYSQL_LOG_QUERIES: "true"
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USERNAME}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      MYSQL_ALLOW_EMPTY_PASSWORD: "yes"
+    ports:
+      - "${MYSQL_PORT_LOCAL}:${MYSQL_PORT}"
+    command: >
+      --general_log=ON
+      --general_log_file=/var/lib/mysql/general.log
+      --log_output=FILE
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - mysql-logs:/var/lib/mysql
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - supportchat
+  supportchat_migrate:
+    container_name: supportchat_migrate
+    env_file: ./../configs/.env
+    image: migrate/migrate:v4.15.2
+    volumes:
+      - ./../db/migrations:/migrations
+    entrypoint: ["sh", "-c", "sleep infinity"]
+    depends_on:
+      - supportchat_mysql
+    networks:
+      - supportchat    
+  phpmyadmin:
+    container_name: supportchat_phpmyadmin
+    image: phpmyadmin/phpmyadmin
+    environment:
+      PMA_HOST: supportchat_mysql
+      PMA_PORT: ${MYSQL_PORT}
+      PMA_USER: ${MYSQL_USERNAME}
+      PMA_PASSWORD: ${MYSQL_PASSWORD}
+    ports:
+      - "${PHPMYADMIN_PORT_LOCAL}:${PHPMYADMIN_PORT}"
+    networks:
+      - supportchat
+  redis:
+    image: redis:6.0.9-alpine
+    container_name: supportchat_redis
+    ports:
+      - "${REDIS_PORT_LOCAL}:${REDIS_PORT}"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep PONG"]
+      interval: 1s
+      timeout: 3s
+      retries: 5
+    command: ["redis-server", "--requirepass", "${REDIS_PASS}"]
+    networks:
+      - supportchat
+  # supportchat_linter:
+  #   container_name: supportchat_linter
+  #   image: golangci/golangci-lint:v1.42
+  #   volumes:
+  #     - .:/app
+  #     - ./.golangci.yml:/app/.golangci.yml
+  #   working_dir: /app
+  #   entrypoint: ["sh", "-c", "sleep infinity"]
+  #   command: ["golangci-lint", "run", "--config", "/app/.golangci.yml"]
+  #   depends_on:
+  #     - supportchat
+  #   networks:
+  #     - supportchat
+networks:
+  supportchat:
+    driver: bridge
+    
+volumes:
+  mysql-data:
+  mysql-logs:
