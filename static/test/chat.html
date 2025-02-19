@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>WebSocket Chat with Persistent History</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+    }
+    #chat {
+      width: 300px;
+      height: 300px;
+      border: 1px solid #ccc;
+      padding: 5px;
+      overflow-y: auto;
+      margin-bottom: 10px;
+    }
+    #messageInput {
+      width: 220px;
+      padding: 5px;
+    }
+    button {
+      padding: 5px 10px;
+    }
+    .message {
+      margin: 5px 0;
+    }
+    .message span.user {
+      font-weight: bold;
+      margin-right: 5px;
+    }
+  </style>
+</head>
+<body>
+  <h1>WebSocket Chat</h1>
+  <div id="chat"></div>
+  <input type="text" id="messageInput" placeholder="Type a message..." />
+  <button id="sendBtn">Send</button><br><br>
+  <button id="signUpBtn">Sign Up</button>
+  <button id="loginBtn" >Login</button>
+  <button id="CheckTokenBtn" >Check Token</button>
+  <button id="userInforBtn" >User Information</button>
+
+
+<script>
+  // user information
+  const wsUrlUserInfor = "http://localhost:8077/api/user";
+  const userInforBtn = document.getElementById('userInforBtn');
+
+  userInforBtn.addEventListener('click', function() {
+    var token = getToken();
+    let userSession = getUserSession();
+    const data = {
+      user_id: userSession.userId,
+      user_session: userSession.sessionId,
+    };
+    const myHeaders = new Headers();
+    myHeaders.append('Authorization', 'Bearer ' + token);
+    myHeaders.append('Content-Type', 'application/json');
+    // add token to header for authorization
+    fetch(wsUrlUserInfor, {
+      method: 'POST',
+      headers: myHeaders,
+      body: JSON.stringify(data)
+    })
+    .then(response => response.json())
+    .then(data => {
+      console.log('Success:', data);
+        // if exist data.token
+        if (data.user_id) {
+          alert("User ID: " + data.user_id + "\n" + "Session ID: " + data.session_id);
+        } else {
+          alert("User information not found");
+        }
+    })
+    .catch(error => {
+      console.error('Error:', error);
+    });
+  });
+</script>
+
+  <script>
+  // sign up
+  const wsUrlSignUp = "http://localhost:8077/auth/api/signup";
+  const signUpBtn = document.getElementById('signUpBtn');
+  var sessionId = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+  var chatUserId = "";
+  // get user session
+  const userSession = getUserSession();
+  if (userSession.sessionId) {
+    sessionId = userSession.sessionId;
+  }
+  if (userSession.userId) {
+    chatUserId = userSession.userId;
+  }
+
+  signUpBtn.addEventListener('click', function() {
+    // check if user already signed up
+    let userSessionSignUp = getUserSession();
+    if (userSessionSignUp.userId && userSessionSignUp.sessionId) {
+      alert("You already signed up");
+      return;
+    }
+    // generate a random session ID
+    const data = {
+      session_id: sessionId,
+      name: "",
+      email: "",
+    };
+    fetch(wsUrlSignUp, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(data)
+    })
+    .then(response => response.json())
+    .then(data => {
+      console.log('Success:', data);
+      if (data.user_id) {
+        chatUserId = data.user_id;
+        setUserSession(chatUserId, sessionId);
+        alert("Sign up success");
+      } else {
+        alert("Sign up failed");
+      }
+    })
+    .catch(error => {
+      console.error('Error:', error);
+    });
+  });
+
+  // token storage
+  function setToken(token) {
+    localStorage.setItem('token', token);
+  }
+
+  function getToken() {
+    return localStorage.getItem('token');
+  }
+
+  function removeToken() {
+    localStorage.removeItem('token');
+  }
+
+  function isLoggedIn() {
+    return getToken() !== null;
+  }
+
+  function setUserSession(userId, sessionId) {
+    localStorage.setItem('userId', userId);
+    localStorage.setItem('sessionId', sessionId);
+  }
+
+  function getUserSession() {
+    return {
+      userId: localStorage.getItem('userId'),
+      sessionId: localStorage.getItem('sessionId')
+    };
+  }
+
+  function removeUserSession() {
+    localStorage.removeItem('userId');
+    localStorage.removeItem('sessionId');
+  }
+  </script>
+  <script>
+    // ----- Configuration -----
+    // Replace with your own WebSocket server URL.
+    const wsUrl = "ws://localhost:8077";
+    // If you need to pass an auth token (JWT, etc.) as a query parameter,
+    // set it here. Otherwise, you can leave it blank or use "anonymous".
+    const token = "anonymous";
+    const fullWsUrl = "http://localhost:8077/chat-support/ws?token=" + token + "&session_id=" + sessionId + "&userId=" + chatUserId;
+    
+    // Key for storing/retrieving chat history from localStorage.
+    const CHAT_HISTORY_KEY = "chatHistory";
+
+    // ----- DOM Elements -----
+    const chatDiv = document.getElementById('chat');
+    const messageInput = document.getElementById('messageInput');
+    const sendBtn = document.getElementById('sendBtn');
+    
+    // ----- Chat History Management -----
+    // Load chat history from localStorage (returns an array or empty array)
+    function loadChatHistory() {
+      const historyStr = localStorage.getItem(CHAT_HISTORY_KEY);
+      try {
+        return historyStr ? JSON.parse(historyStr) : [];
+      } catch(e) {
+        console.error("Error parsing chat history:", e);
+        return [];
+      }
+    }
+
+    // Save chat history (array) to localStorage
+    function saveChatHistory(history) {
+      localStorage.setItem(CHAT_HISTORY_KEY, JSON.stringify(history));
+    }
+
+    // Append a message object (e.g., { user: "Anonymous", text: "Hello" })
+    // to the chat UI.
+    function appendMessage(messageObj) {
+      const p = document.createElement('p');
+      p.classList.add('message');
+
+      if (messageObj.user) {
+        const spanUser = document.createElement('span');
+        spanUser.classList.add('user');
+        spanUser.textContent = `[${messageObj.user}] `;
+        p.appendChild(spanUser);
+      }
+
+      const spanText = document.createElement('span');
+      spanText.textContent = messageObj.text;
+      p.appendChild(spanText);
+
+      chatDiv.appendChild(p);
+      chatDiv.scrollTop = chatDiv.scrollHeight;
+    }
+
+    // Render all messages from an array
+    function renderChatHistory(history) {
+      chatDiv.innerHTML = ""; // Clear current chat area
+      history.forEach(appendMessage);
+    }
+
+    // Initialize chat history from localStorage
+    let chatHistory = loadChatHistory();
+    renderChatHistory(chatHistory);
+
+    // ----- WebSocket Connection -----
+    const ws = new WebSocket(fullWsUrl);
+
+    ws.onopen = function() {
+      console.log("Connected to the WebSocket server.");
+    };
+
+    ws.onmessage = function(event) {
+      let data;
+      try {
+        data = JSON.parse(event.data);
+      } catch(e) {
+        // Fallback if the message isn't valid JSON
+        data = { text: event.data, user: "System" };
+      }
+      
+      // Append the received message to the chat UI and save it
+      appendMessage(data);
+      chatHistory.push(data);
+      saveChatHistory(chatHistory);
+    };
+
+    ws.onerror = function(error) {
+      console.error("WebSocket error:", error);
+    };
+
+    // ----- Sending Messages -----
+    function sendMessage() {
+      const text = messageInput.value.trim();
+      if (text !== "") {
+        let tokenLocal = getToken();
+        let chatUserId = getUserSession().userId;
+        // Build a message object. In this example, the "user" is determined
+        // based on the token value. Adjust as needed.
+        const messageObj = {
+          token: tokenLocal,
+          userId: chatUserId,
+          text: text
+        };
+        // Send the message as a JSON string.
+        ws.send(JSON.stringify(messageObj));
+        // Optionally, also append the message locally
+        appendMessage(messageObj);
+        chatHistory.push(messageObj);
+        saveChatHistory(chatHistory);
+        messageInput.value = "";
+      }
+    }
+
+    // Event listeners for sending messages
+    sendBtn.addEventListener('click', sendMessage);
+    messageInput.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        sendMessage();
+      }
+    });
+  </script>
+  <script>
+  // login
+  const wsUrlLogin = "http://localhost:8077/auth/api/login";
+  const loginBtn = document.getElementById('loginBtn');
+  loginBtn.addEventListener('click', function() {
+    // check if user already has token
+    {{/* if (isLoggedIn()) {
+      alert("You already logged in");
+      return;
+    } */}}
+    var userSession = getUserSession();
+    console.log(userSession);
+    const data = {
+      session_id: userSession.sessionId,
+      user_id: userSession.userId,
+    };
+    fetch(wsUrlLogin, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(data)
+    })
+    .then(response => response.json())
+    .then(data => {
+      console.log('Success:', data);
+        // if exist data.token
+        if (data.token) {
+          setToken(data.token);
+        } else {
+          alert("Login failed");
+        }
+    })
+    .catch(error => {
+      console.error('Error:', error);
+    });
+  });
+
+  </script>
+  <script>
+  // check token
+  const wsUrlCheckToken = "http://localhost:8077/api/check-token";
+  const CheckTokenBtn = document.getElementById('CheckTokenBtn');
+  CheckTokenBtn.addEventListener('click', function() {
+    var token = getToken();
+    let userSession = getUserSession();
+    const data = {
+      user_id: userSession.userId,
+      user_session: userSession.sessionId,
+    };
+    const myHeaders = new Headers();
+    myHeaders.append('Authorization', 'Bearer ' + token);
+    myHeaders.append('Content-Type', 'application/json');
+    // add token to header for authorization
+    fetch(wsUrlCheckToken, {
+      method: 'POST',
+      headers: myHeaders,
+      body: JSON.stringify(data)
+    })
+    .then(response => response.json())
+    .then(data => {
+      console.log('Success:', data);
+        // if exist data.token
+        if (data.token) {
+          alert("Token is valid");
+        } else {
+          alert("Token is invalid");
+        }
+    })
+    .catch(error => {
+      console.error('Error:', error);
+    });
+  });
+  </script>
+
+</body>
+</html>
